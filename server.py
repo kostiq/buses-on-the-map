@@ -64,7 +64,7 @@ async def listen_browser(ws, bounds):
 
 async def send_buses(ws, bounds):
     while True:
-        try:
+        with suppress(ConnectionClosed):
             buses_in_window = list(filter_buses(buses.values(), bounds))
             message_to_browser = {
                 "msgType": "Buses",
@@ -75,14 +75,12 @@ async def send_buses(ws, bounds):
                 await ws.send_message(json.dumps(message_to_browser))
 
             await trio.sleep(1)
-        except ConnectionClosed:
-            break
 
 
 async def get_fake_bus_info(request):
     ws = await request.accept()
     while True:
-        try:
+        with suppress(ConnectionClosed):
             message = await ws.get_message()
             invalid = check_bus_message(message)
             logging.info(f'get from buses {message}')
@@ -94,9 +92,6 @@ async def get_fake_bus_info(request):
             json_message = json.loads(message)
             bus_id = json_message['busId']
             buses[bus_id] = json_message
-
-        except ConnectionClosed:
-            break
 
 
 async def talk_to_browser(request):

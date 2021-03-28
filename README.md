@@ -12,7 +12,7 @@
 - Активируйте виртуальное окржуение ```source venv/bin/activate```
 - Установить зависимости ```pip install -r requirements.txt```
 - Запустите сервер ```python server.py```
-- Запустите генератор данных ```python face_bus.py```
+- Запустите генератор данных ```python fake_bus.py```
 - Откройте в браузере файл `index.html`
 
 
