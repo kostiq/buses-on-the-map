@@ -1,4 +1,5 @@
 import functools
+import itertools
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ import trio
 from trio_websocket import open_websocket_url, HandshakeError, ConnectionClosed
 
 from model import Bus
+
+CHANNEL_BUFFER_SIZE = 100
 
 
 def load_routes(directory_path='routes'):
@@ -39,34 +42,25 @@ def relaunch_on_disconnect(async_function):
     return wrapper
 
 
-async def run_bus(send_channel, route_number, emulator_id, bus_count=1):
-    bus_routes = list(load_routes())[:route_number]
+async def run_bus(send_channel, bus_info, emulator_id, bus_count, refresh_timeout):
     bus_offsets = {}
-    for bus_info in bus_routes:
-        bus_name = bus_info['name']
-        coordinates = bus_info['coordinates']
-        coordinates_length = len(coordinates)
+    bus_name = bus_info['name']
+    coordinates = bus_info['coordinates']
+    coordinates_length = len(coordinates)
 
-        bus_offsets[bus_name] = [random.randint(0, coordinates_length) for _ in range(bus_count)]
+    bus_offsets[bus_name] = [random.randint(0, coordinates_length) for _ in range(bus_count)]
 
-    step = 0
-    async with send_channel:
-        while True:
-            for bus_info in bus_routes:
-                bus_name = bus_info['name']
-                coordinates = bus_info['coordinates']
-                coordinates_length = len(coordinates)
-                for bus_index, bus_offset in enumerate(bus_offsets[bus_name]):
-                    lat, lng = coordinates[(bus_offset + step) % coordinates_length]
-                    bus_id = generate_bus_id(bus_name, bus_index, emulator_id)
-                    bus = Bus(bus_id, lat, lng, bus_name)
+    for tick in itertools.count():
+        for bus_index, bus_offset in enumerate(bus_offsets[bus_name]):
+            lat, lng = coordinates[(bus_offset + tick) % coordinates_length]
+            bus_id = generate_bus_id(bus_name, bus_index, emulator_id)
+            bus = Bus(bus_id, lat, lng, bus_name)
 
-                    message = json.dumps(asdict(bus), ensure_ascii=False)
+            message = json.dumps(asdict(bus), ensure_ascii=False)
 
-                    logging.info(f'send to channel {message}')
-                    await send_channel.send(message)
-
-            step += 1
+            logging.info(f'send to channel {message}')
+            await send_channel.send(message)
+            await trio.sleep(refresh_timeout)
 
 
 @relaunch_on_disconnect
@@ -101,9 +95,11 @@ async def main(server, route_number, buses_per_route, websocket_number, emulator
     logging.basicConfig(**logging_params)
 
     async with trio.open_nursery() as nursery:
-        send_channel, receive_channel = trio.open_memory_channel(0)
-        nursery.start_soon(run_bus, send_channel, route_number, emulator_id, buses_per_route)
+        send_channel, receive_channel = trio.open_memory_channel(CHANNEL_BUFFER_SIZE)
         nursery.start_soon(send_updates, server, receive_channel, websocket_number, refresh_timeout)
+
+        for bus_info in list(load_routes())[:route_number]:
+            nursery.start_soon(run_bus, send_channel, bus_info, emulator_id, buses_per_route, refresh_timeout)
 
 
 if __name__ == '__main__':
